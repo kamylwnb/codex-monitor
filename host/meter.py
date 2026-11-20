@@ -2,11 +2,12 @@
 # requires-python = ">=3.11"
 # dependencies = ["bleak>=3.0,<4", "pyserial>=3.5,<4"]
 # ///
-"""Codex Meter: account quota -> portable protocol -> Flipper BLE."""
+"""Send Codex account quota to Flipper Zero over Bluetooth LE or USB."""
 import argparse
 import asyncio
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -30,7 +31,7 @@ class Codex:
             self.executable, "app-server", stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             limit=4 * 1024 * 1024,
-            **({"creationflags": subprocess.CREATE_NO_WINDOW} if __import__('os').name == 'nt' else {}))
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}))
         try:
             await self.call("initialize", {"clientInfo": {"name": "codex_meter", "version": "1.0.0"}})
             self.send({"method": "initialized", "params": {}})
@@ -138,7 +139,7 @@ async def usb_main(args, executable):
         ports = [p.device for p in list_ports.comports() if p.vid == 0x0483 and p.pid == 0x5740]
         selected = args.port or (ports[0] if len(ports) == 1 else None)
         if not selected:
-            log("Podlacz Flipper przez USB. Przy kilku urzadzeniach podaj --port COM3.")
+            log("Podlacz Flipper przez USB. Przy kilku urzadzeniach podaj --port.")
             await asyncio.sleep(5)
             continue
         try:
@@ -240,8 +241,8 @@ async def main(args):
             log("Znaleziono Flippera. Lacze BLE; zatwierdz kod parowania, jesli sie pojawi.")
             # Flipper changes GATT profiles between apps; avoid Windows' stale
             # HID/serial service cache after switching back to Codex Meter.
-            async with BleakClient(device, pair=True, timeout=45,
-                                   winrt={"use_cached_services": False}) as client:
+            options = {"winrt": {"use_cached_services": False}} if os.name == "nt" else {}
+            async with BleakClient(device, pair=True, timeout=45, **options) as client:
                 log("Polaczenie BLE gotowe, uruchamiam odczyt Codexa.")
                 async with Codex(executable) as codex:
                     await serve(client, codex, args)
@@ -251,10 +252,10 @@ async def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--once", action="store_true", help="Odczyt bez Bluetooth")
+    parser.add_argument("--once", action="store_true", help="Odczyt bez polaczenia z Flipperem")
     parser.add_argument("--transport", choices=["ble", "usb"], default="ble")
-    parser.add_argument("--port", help="Port USB, np. COM3")
-    parser.add_argument("--codex", help="Sciezka do codex.exe")
+    parser.add_argument("--port", help="Port USB, np. COM3 lub /dev/ttyACM0")
+    parser.add_argument("--codex", help="Sciezka do pliku wykonywalnego Codex CLI")
     parser.add_argument("--address", help="Adres Bluetooth wybranego Flippera")
     parser.add_argument("--bucket", help="Identyfikator limitu, domyslnie codex")
     parser.add_argument("--interval", type=int, default=60)
